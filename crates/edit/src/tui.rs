@@ -2297,14 +2297,19 @@ impl<'a> Context<'a, '_> {
 
                     // If the editor is only 1 line tall we can't possibly scroll up or down.
                     if height >= 2 {
-                        fn calc(min: CoordType, max: CoordType, mouse: CoordType) -> CoordType {
+                        fn calc(
+                            min: CoordType,
+                            max: CoordType,
+                            down: CoordType,
+                            mouse: CoordType,
+                        ) -> CoordType {
                             // Otherwise, the scroll zone is up to 3 lines at the top/bottom.
                             let zone_height = ((max - min) / 2).min(3);
 
                             // The .y positions where the scroll zones begin:
                             // Mouse coordinates above top and below bottom respectively.
-                            let scroll_min = min + zone_height;
-                            let scroll_max = max - zone_height - 1;
+                            let scroll_min = down.min(min + zone_height);
+                            let scroll_max = down.max(max - zone_height - 1);
 
                             // Calculate the delta for scrolling up or down.
                             let delta_min = (mouse - scroll_min).clamp(-zone_height, 0);
@@ -2314,12 +2319,13 @@ impl<'a> Context<'a, '_> {
                             let idx = 3 + delta_min + delta_max;
 
                             const SPEEDS: [CoordType; 7] = [-9, -3, -1, 0, 1, 3, 9];
-                            let idx = idx.clamp(0, SPEEDS.len() as CoordType) as usize;
+                            let idx = idx.clamp(0, SPEEDS.len() as CoordType - 1) as usize;
                             SPEEDS[idx]
                         }
 
-                        let delta_x = calc(text_rect.left, text_rect.right, mouse.x);
-                        let delta_y = calc(text_rect.top, text_rect.bottom, mouse.y);
+                        let down = self.tui.mouse_down_position;
+                        let delta_x = calc(text_rect.left, text_rect.right, down.x, mouse.x);
+                        let delta_y = calc(text_rect.top, text_rect.bottom, down.y, mouse.y);
 
                         tc.scroll_offset.x += delta_x;
                         tc.scroll_offset.y += delta_y;
