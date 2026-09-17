@@ -2423,7 +2423,11 @@ impl<'a> Context<'a, '_> {
                     } else {
                         CursorMovement::Grapheme
                     };
-                    tb.delete(granularity, -1);
+                    if single_line {
+                        tb.delete(granularity, -1);
+                    } else {
+                        tb.backspace_with_auto_unindent(granularity);
+                    }
                 }
                 vk::TAB => {
                     if single_line {

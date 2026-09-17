@@ -201,12 +201,14 @@ struct ActiveEditGroupInfo {
 }
 
 /// Char- or word-wise navigation? Your choice.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CursorMovement {
     Grapheme,
     Word,
 }
 
 /// See [`TextBuffer::move_selected_lines`].
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MoveLineDirection {
     Up,
     Down,
@@ -2580,7 +2582,7 @@ impl TextBuffer {
         let mut chars = 0;
         let mut columns = 0;
 
-        'outer: loop {
+        'outer: while columns < max_columns {
             let chunk = self.read_forward(offset);
             if chunk.is_empty() {
                 break;
@@ -2600,15 +2602,65 @@ impl TextBuffer {
             }
 
             offset += chunk.len();
-
-            // No need to do another round if we
-            // already got the exact right amount.
-            if columns >= max_columns {
-                break;
-            }
         }
 
         (chars, columns)
+    }
+
+    /// This is basically the backspace operation, the way editors typically want it:
+    /// It unindents the line if the cursor is within the leading indentation.
+    pub fn backspace_with_auto_unindent(&mut self, granularity: CursorMovement) {
+        'unindent: {
+            // If there's a selection backspace deletes it.
+            if self.selection.is_some() {
+                break 'unindent;
+            }
+
+            // If we're at a line start backspace deletes the newline.
+            if self.cursor.logical_pos.x <= 0 {
+                break 'unindent;
+            }
+
+            let line_start = self.goto_line_start(self.cursor, self.cursor.logical_pos.y);
+
+            // Determine the position of the new (reduced) indentation.
+            // For Backspace (Grapheme) it's one "tab", but for Ctrl+Backspace (Word) it's to the line start.
+            let prev_column = if granularity == CursorMovement::Grapheme {
+                self.tab_size_prev_column(self.cursor.column)
+            } else {
+                0 // Ctrl+Backspace (Word) = line start
+            };
+            let (from_pos, from_col) = self.measure_indent_internal(line_start.offset, prev_column);
+
+            // Check if the cursor is within the leading indentation.
+            // This continues the measurement where we left off, so there's some extra arithmetic involved.
+            let (delta, _) = self.measure_indent_internal(
+                line_start.offset + from_pos as usize,
+                self.cursor.column - from_col,
+            );
+            if delta + from_pos < self.cursor.logical_pos.x {
+                break 'unindent;
+            }
+
+            // Here would technically just do `self.delete(CursorMovement::Grapheme, -delta);`
+            // but since we already got the `line_start`, etc., this is a bit more straightforward.
+            let to = self.cursor;
+            let from = if granularity == CursorMovement::Grapheme {
+                self.cursor_move_to_logical_internal(
+                    line_start,
+                    Point { x: from_pos, y: line_start.logical_pos.y },
+                )
+            } else {
+                line_start
+            };
+            self.edit_begin(HistoryType::Delete, from);
+            self.edit_delete(to);
+            self.edit_end();
+            return;
+        }
+
+        // If we didn't perform an unindent, fall back to a regular backspace.
+        self.delete(granularity, -1);
     }
 
     /// Displaces the current, cursor or the selection, line(s) in the given direction.
